@@ -1,159 +1,165 @@
-<div>Cloud Computing Module 1: Teachable Machine - Benjamin Lukin</div>
-<button type="button" onclick="init()">Start</button>
-<div id="webcam-container"></div>
-<div id="label-container"></div>
-<div id="break-timer">Seconds spent on a break: <span id="time">0</span>s</div>
-<button type="button" onclick="breakTimer.resetTimer()">Reset Break Timer</button>
-<div id="notification">No notifications</div>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
-<script type="text/javascript">
-    // More API functions here:
-    // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/image
-
-    // the link to your model provided by Teachable Machine export panel
-    const URL = "https://teachablemachine.withgoogle.com/models/xxhuY9KkB/";
-
-    let model, webcam, labelContainer, maxPredictions;
-
-    // Creating the timer that we use to keep track of how long break time has lasted for
-    // The example for this bit of code was found on StackOverflow: https://stackoverflow.com/a/57981688 
-    class Timer {
-        constructor() {
-            // Properties of the timer
-            this.isRunning = false;
-            this.startTime = 0;
-            this.overallTime = 0;
-        }
+<!DOCTYPE html>
+<html>
+    <head>Github Pages Example</head>
+    <body>
+        <div>Cloud Computing Module 1: Teachable Machine - Benjamin Lukin</div>
+        <button type="button" onclick="init()">Start</button>
+        <div id="webcam-container"></div>
+        <div id="label-container"></div>
+        <div id="break-timer">Seconds spent on a break: <span id="time">0</span>s</div>
+        <button type="button" onclick="breakTimer.resetTimer()">Reset Break Timer</button>
+        <div id="notification">No notifications</div>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+        <script type="text/javascript">
+            // More API functions here:
+            // https://github.com/googlecreativelab/teachablemachine-community/tree/master/libraries/image
         
-        // Method that is used to update overallTime when the timer is stopped, or to return the current accurate overallTime
-        // when we call getTime while the timer is active
-        _getTimeElapsedSinceLastStart() {
-            if (!this.startTime) {
-                return 0;
+            // the link to your model provided by Teachable Machine export panel
+            const URL = "https://teachablemachine.withgoogle.com/models/xxhuY9KkB/";
+        
+            let model, webcam, labelContainer, maxPredictions;
+        
+            // Creating the timer that we use to keep track of how long break time has lasted for
+            // The example for this bit of code was found on StackOverflow: https://stackoverflow.com/a/57981688 
+            class Timer {
+                constructor() {
+                    // Properties of the timer
+                    this.isRunning = false;
+                    this.startTime = 0;
+                    this.overallTime = 0;
+                }
+                
+                // Method that is used to update overallTime when the timer is stopped, or to return the current accurate overallTime
+                // when we call getTime while the timer is active
+                _getTimeElapsedSinceLastStart() {
+                    if (!this.startTime) {
+                        return 0;
+                    }
+                    return Date.now() - this.startTime;
+                }
+        
+                // Method for starting the timer
+                startTimer() {
+                    if (this.isRunning) {
+                        return console.error("Timer is already active");
+                    }
+                    this.isRunning = true;
+                    this.startTime = Date.now();
+                }
+        
+                // Method for stopping the timer
+                stopTimer() {
+                    if (!this.isRunning) {
+                        return console.error("Timer is already inactive");
+                    }
+                    this.isRunning = false;
+                    this.overallTime = this.overallTime + this._getTimeElapsedSinceLastStart();
+                }
+        
+                // Method for resetting the timer
+                resetTimer() {
+                    this.overallTime = 0;
+                    if (this.isRunning) {
+                        this.startTime = Date.now();
+                        // Also reset the notification text to the default
+                        document.getElementById("notification").innerText = "No notifications"
+                        return;
+                    }
+                    this.startTime = 0;
+                    document.getElementById("notification").innerText = "No notifications"
+                }
+        
+                // Method for getting the current overallTime, used for checking whether amount of time allocated for breaks has been exceeded
+                getTime() {
+                    if (!this.startTime) {
+                        return 0;
+                    }
+        
+                    if (this.isRunning) {
+                        return this.overallTime + this._getTimeElapsedSinceLastStart();
+                    }
+                    return this.overallTime;
+                }
             }
-            return Date.now() - this.startTime;
-        }
-
-        // Method for starting the timer
-        startTimer() {
-            if (this.isRunning) {
-                return console.error("Timer is already active");
+        
+            // Set up the break timer, outside of init because we need to use it in the predict function
+            const breakTimer = new Timer();
+            // Constant which determines (in milliseconds) how long breaks are allowed to last in total
+            // Set to 30000 milliseconds (30 seconds) for the sake of testing, obviously in a non-prototype this would be a much higher number
+            // also i feel that i am legally and morally obligated to state that i do not condone the existence of the kind of software
+            // that i ended up creating for this :D a workplace would have to be brutally strict to keep track of employee break durations down to the second
+            const allocatedBreakTime = 30000;
+        
+            // Load the image model and setup the webcam
+            async function init() {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+        
+                // load the model and metadata
+                // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
+                // or files from your local hard drive
+                // Note: the pose library adds "tmImage" object to your window (window.tmImage)
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+        
+                // Convenience function to setup a webcam
+                const flip = true; // whether to flip the webcam
+                webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
+                await webcam.setup(); // request access to the webcam
+                await webcam.play();
+                window.requestAnimationFrame(loop);
+        
+                // append elements to the DOM
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+                labelContainer = document.getElementById("label-container");
+                for (let i = 0; i < maxPredictions; i++) { // and class labels
+                    labelContainer.appendChild(document.createElement("div"));
+                }
+        
             }
-            this.isRunning = true;
-            this.startTime = Date.now();
-        }
-
-        // Method for stopping the timer
-        stopTimer() {
-            if (!this.isRunning) {
-                return console.error("Timer is already inactive");
+        
+            async function loop() {
+                webcam.update(); // update the webcam frame
+                await predict();
+                window.requestAnimationFrame(loop);
             }
-            this.isRunning = false;
-            this.overallTime = this.overallTime + this._getTimeElapsedSinceLastStart();
-        }
-
-        // Method for resetting the timer
-        resetTimer() {
-            this.overallTime = 0;
-            if (this.isRunning) {
-                this.startTime = Date.now();
-                // Also reset the notification text to the default
-                document.getElementById("notification").innerText = "No notifications"
-                return;
+        
+            // run the webcam image through the image model
+            async function predict() {
+                // predict can take in an image, video or canvas html element
+                const prediction = await model.predict(webcam.canvas);
+                for (let i = 0; i < maxPredictions; i++) {
+                    const classPrediction =
+                        prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+                    labelContainer.childNodes[i].innerHTML = classPrediction;
+                }
+        
+                // If the model detects that the user sitting at the computer is taking a break, as determined by the dataset, start the timer
+                // We know that prediction[1] represents the "Break" class by looking at the metadata.json file, accessible from the cloud by
+                // pasting the URL into a browser and appending metadata.json to the end of it, where we can see that "Break" is the second label.
+                if (prediction[1].probability.toFixed(2) > 0.95 && !breakTimer.isRunning) {
+                    // We also double check that the timer isn't already running
+                    breakTimer.startTimer();
+                    // Every 100 milliseconds, we update the UI element that shows how many seconds in total have been spent on break
+                    setInterval(()=> {
+                        const timeInSeconds = Math.round(breakTimer.getTime() / 1000);
+                        document.getElementById("time").innerText = timeInSeconds;
+                    }, 100)
+                }
+        
+                // Same as above, but for turning the timer off when the user is detected to be working and the timer is on.
+                // As with above, we can determine that prediction[0] represents the "Working" class from the metadata.json file, where
+                // "Working" is the first label.
+                if (prediction[0].probability.toFixed(2) > 0.95 && breakTimer.isRunning) {
+                    breakTimer.stopTimer();
+                }
+        
+                // If the current overallTime spent on break is greater than the allocated break time, we update the UI with a notification
+                if (breakTimer.getTime() > allocatedBreakTime) {
+                    document.getElementById("notification").innerText = "Break time exceeded! Get back to work!"
+                }
             }
-            this.startTime = 0;
-            document.getElementById("notification").innerText = "No notifications"
-        }
-
-        // Method for getting the current overallTime, used for checking whether amount of time allocated for breaks has been exceeded
-        getTime() {
-            if (!this.startTime) {
-                return 0;
-            }
-
-            if (this.isRunning) {
-                return this.overallTime + this._getTimeElapsedSinceLastStart();
-            }
-            return this.overallTime;
-        }
-    }
-
-    // Set up the break timer, outside of init because we need to use it in the predict function
-    const breakTimer = new Timer();
-    // Constant which determines (in milliseconds) how long breaks are allowed to last in total
-    // Set to 30000 milliseconds (30 seconds) for the sake of testing, obviously in a non-prototype this would be a much higher number
-    // also i feel that i am legally and morally obligated to state that i do not condone the existence of the kind of software
-    // that i ended up creating for this :D a workplace would have to be brutally strict to keep track of employee break durations down to the second
-    const allocatedBreakTime = 30000;
-
-    // Load the image model and setup the webcam
-    async function init() {
-        const modelURL = URL + "model.json";
-        const metadataURL = URL + "metadata.json";
-
-        // load the model and metadata
-        // Refer to tmImage.loadFromFiles() in the API to support files from a file picker
-        // or files from your local hard drive
-        // Note: the pose library adds "tmImage" object to your window (window.tmImage)
-        model = await tmImage.load(modelURL, metadataURL);
-        maxPredictions = model.getTotalClasses();
-
-        // Convenience function to setup a webcam
-        const flip = true; // whether to flip the webcam
-        webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
-        await webcam.setup(); // request access to the webcam
-        await webcam.play();
-        window.requestAnimationFrame(loop);
-
-        // append elements to the DOM
-        document.getElementById("webcam-container").appendChild(webcam.canvas);
-        labelContainer = document.getElementById("label-container");
-        for (let i = 0; i < maxPredictions; i++) { // and class labels
-            labelContainer.appendChild(document.createElement("div"));
-        }
-
-    }
-
-    async function loop() {
-        webcam.update(); // update the webcam frame
-        await predict();
-        window.requestAnimationFrame(loop);
-    }
-
-    // run the webcam image through the image model
-    async function predict() {
-        // predict can take in an image, video or canvas html element
-        const prediction = await model.predict(webcam.canvas);
-        for (let i = 0; i < maxPredictions; i++) {
-            const classPrediction =
-                prediction[i].className + ": " + prediction[i].probability.toFixed(2);
-            labelContainer.childNodes[i].innerHTML = classPrediction;
-        }
-
-        // If the model detects that the user sitting at the computer is taking a break, as determined by the dataset, start the timer
-        // We know that prediction[1] represents the "Break" class by looking at the metadata.json file, accessible from the cloud by
-        // pasting the URL into a browser and appending metadata.json to the end of it, where we can see that "Break" is the second label.
-        if (prediction[1].probability.toFixed(2) > 0.95 && !breakTimer.isRunning) {
-            // We also double check that the timer isn't already running
-            breakTimer.startTimer();
-            // Every 100 milliseconds, we update the UI element that shows how many seconds in total have been spent on break
-            setInterval(()=> {
-                const timeInSeconds = Math.round(breakTimer.getTime() / 1000);
-                document.getElementById("time").innerText = timeInSeconds;
-            }, 100)
-        }
-
-        // Same as above, but for turning the timer off when the user is detected to be working and the timer is on.
-        // As with above, we can determine that prediction[0] represents the "Working" class from the metadata.json file, where
-        // "Working" is the first label.
-        if (prediction[0].probability.toFixed(2) > 0.95 && breakTimer.isRunning) {
-            breakTimer.stopTimer();
-        }
-
-        // If the current overallTime spent on break is greater than the allocated break time, we update the UI with a notification
-        if (breakTimer.getTime() > allocatedBreakTime) {
-            document.getElementById("notification").innerText = "Break time exceeded! Get back to work!"
-        }
-    }
-</script>
+        </script>    
+    </body>
+</html>
